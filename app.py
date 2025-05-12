@@ -4,7 +4,6 @@ import json
 import time
 import base64
 import pandas as pd
-import os
 from datetime import datetime
 from PIL import Image
 from io import BytesIO
@@ -85,6 +84,15 @@ headers = {
     "Authorization": f"Key {api_key}"
 }
 
+# Function to safely get value from dictionary
+def safe_get(dictionary, key, default=None):
+    """Safely get a value from a dictionary"""
+    if dictionary is None:
+        return default
+    if not isinstance(dictionary, dict):
+        return default
+    return dictionary.get(key, default)
+
 # Function to fetch avatars with caching
 @st.cache_data(ttl=600)
 def get_avatars(api_key):
@@ -94,9 +102,31 @@ def get_avatars(api_key):
             headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Debug output
+        if show_debug:
+            st.write("Avatar API Response:", data)
+        
+        # Check if data is a list
+        if not isinstance(data, list):
+            # If data is not a list, check if it has a data field that is a list
+            if isinstance(data, dict) and isinstance(data.get('data'), list):
+                return data.get('data')
+            st.error(f"Unexpected avatar data format: {type(data)}")
+            return []
+        
+        return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching avatars: {str(e)}")
+        if show_debug and hasattr(e, 'response') and e.response:
+            st.error(f"Response: {e.response.text}")
+        return []
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding avatar JSON: {str(e)}")
+        return []
+    except Exception as e:
+        st.error(f"Unexpected error fetching avatars: {str(e)}")
         return []
 
 # Function to fetch voices with caching
@@ -108,9 +138,31 @@ def get_voices(api_key):
             headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
         )
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+        
+        # Debug output
+        if show_debug:
+            st.write("Voice API Response:", data)
+        
+        # Check if data is a list
+        if not isinstance(data, list):
+            # If data is not a list, check if it has a data field that is a list
+            if isinstance(data, dict) and isinstance(data.get('data'), list):
+                return data.get('data')
+            st.error(f"Unexpected voice data format: {type(data)}")
+            return []
+        
+        return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching voices: {str(e)}")
+        if show_debug and hasattr(e, 'response') and e.response:
+            st.error(f"Response: {e.response.text}")
+        return []
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding voice JSON: {str(e)}")
+        return []
+    except Exception as e:
+        st.error(f"Unexpected error fetching voices: {str(e)}")
         return []
 
 # Function to generate video
@@ -126,6 +178,10 @@ def generate_video(actor_id, voice_id, script, api_key, additional_params=None):
         if additional_params and isinstance(additional_params, dict):
             payload.update(additional_params)
         
+        # Debug output
+        if show_debug:
+            st.write("Generate Video Payload:", payload)
+        
         response = requests.post(
             "https://generate.pipio.ai/single-clip",
             headers={"Authorization": f"Key {api_key}", "Content-Type": "application/json"},
@@ -137,6 +193,12 @@ def generate_video(actor_id, voice_id, script, api_key, additional_params=None):
         st.error(f"Error generating video: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
             st.error(f"Response: {e.response.text}")
+        return None
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding generation JSON: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error generating video: {str(e)}")
         return None
 
 # Function to check video status
@@ -150,6 +212,14 @@ def check_video_status(video_id, api_key):
         return response.json()
     except requests.exceptions.RequestException as e:
         st.error(f"Error checking video status: {str(e)}")
+        if show_debug and hasattr(e, 'response') and e.response:
+            st.error(f"Response: {e.response.text}")
+        return None
+    except json.JSONDecodeError as e:
+        st.error(f"Error decoding status JSON: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error checking status: {str(e)}")
         return None
 
 # Function to download video
@@ -160,6 +230,9 @@ def download_video(url):
         return response.content
     except requests.exceptions.RequestException as e:
         st.error(f"Error downloading video: {str(e)}")
+        return None
+    except Exception as e:
+        st.error(f"Unexpected error downloading video: {str(e)}")
         return None
 
 # Function to add to history
@@ -175,6 +248,18 @@ with st.spinner("Loading avatars and voices..."):
     avatars = get_avatars(api_key)
     voices = get_voices(api_key)
 
+# Check if we got valid data
+if show_debug:
+    st.write(f"Avatars type: {type(avatars)}, length: {len(avatars) if isinstance(avatars, list) else 'N/A'}")
+    st.write(f"Voices type: {type(voices)}, length: {len(voices) if isinstance(voices, list) else 'N/A'}")
+
+if not isinstance(avatars, list) or not isinstance(voices, list):
+    st.error("Failed to load avatars or voices. API returned invalid data format.")
+    if show_debug:
+        st.write("Avatars:", avatars)
+        st.write("Voices:", voices)
+    st.stop()
+
 if not avatars or not voices:
     st.error("Failed to load avatars or voices. Please check your API key and try again.")
     st.stop()
@@ -185,86 +270,106 @@ tab1, tab2, tab3, tab4 = st.tabs(["Select Avatar & Voice", "Generate Video", "Yo
 with tab1:
     st.header("Available Avatars")
     
-    # Create dictionaries for easy lookup
-    avatar_dict = {avatar.get("id"): avatar for avatar in avatars}
-    avatar_names = {avatar.get("name", f"Unknown-{avatar.get('id')}"): avatar.get("id") for avatar in avatars}
+    # Create dictionaries for easy lookup - with safe access
+    avatar_dict = {}
+    avatar_names = {}
+    
+    for avatar in avatars:
+        if isinstance(avatar, dict):
+            avatar_id = safe_get(avatar, "id")
+            if avatar_id:
+                avatar_dict[avatar_id] = avatar
+                avatar_name = safe_get(avatar, "name", f"Unknown-{avatar_id}")
+                avatar_names[avatar_name] = avatar_id
     
     # Display avatars in a grid with selection
-    avatar_cols = st.columns(4)
-    
-    for i, avatar in enumerate(avatars):
-        with avatar_cols[i % 4]:
-            avatar_id = avatar.get("id")
-            avatar_name = avatar.get("name", "Unknown")
-            avatar_image = avatar.get("previewImageUrl")
-            
-            # Create a container for each avatar
-            with st.container():
-                st.subheader(avatar_name)
-                if avatar_image:
-                    st.image(avatar_image, width=150)
-                else:
-                    st.image("https://placeholder.svg?height=150&width=150&query=No+Preview", width=150)
-                
-                # Selection button
-                if st.button(f"Select {avatar_name}", key=f"select_avatar_{i}"):
-                    st.session_state.selected_avatar = avatar_id
-                    add_to_history("Selected Avatar", avatar_name)
-                    st.success(f"Selected avatar: {avatar_name}")
+    if not avatar_dict:
+        st.warning("No valid avatars found. Please check your API key or try again later.")
+    else:
+        avatar_cols = st.columns(4)
+        
+        for i, (avatar_name, avatar_id) in enumerate(avatar_names.items()):
+            avatar = avatar_dict[avatar_id]
+            with avatar_cols[i % 4]:
+                # Create a container for each avatar
+                with st.container():
+                    st.subheader(avatar_name)
+                    avatar_image = safe_get(avatar, "previewImageUrl")
+                    if avatar_image:
+                        st.image(avatar_image, width=150)
+                    else:
+                        st.image("https://placeholder.svg?height=150&width=150&query=No+Preview", width=150)
+                    
+                    # Selection button
+                    if st.button(f"Select {avatar_name}", key=f"select_avatar_{i}"):
+                        st.session_state.selected_avatar = avatar_id
+                        add_to_history("Selected Avatar", avatar_name)
+                        st.success(f"Selected avatar: {avatar_name}")
     
     st.header("Available Voices")
     
-    # Create voice dictionaries
-    voice_dict = {voice.get("id"): voice for voice in voices}
-    voice_names = {f"{voice.get('name', 'Unknown')} ({voice.get('gender', 'Not specified')}, {voice.get('language', 'Not specified')})": voice.get("id") for voice in voices}
+    # Create voice dictionaries - with safe access
+    voice_dict = {}
+    voice_names = {}
+    
+    for voice in voices:
+        if isinstance(voice, dict):
+            voice_id = safe_get(voice, "id")
+            if voice_id:
+                voice_dict[voice_id] = voice
+                voice_name = safe_get(voice, "name", "Unknown")
+                voice_gender = safe_get(voice, "gender", "Not specified")
+                voice_language = safe_get(voice, "language", "Not specified")
+                display_name = f"{voice_name} ({voice_gender}, {voice_language})"
+                voice_names[display_name] = voice_id
     
     # Create a dataframe for better display
-    voice_data = []
-    for voice in voices:
-        voice_id = voice.get("id")
-        voice_name = voice.get("name", "Unknown")
-        voice_gender = voice.get("gender", "Not specified")
-        voice_language = voice.get("language", "Not specified")
-        voice_accent = voice.get("accent", "Not specified")
+    if not voice_dict:
+        st.warning("No valid voices found. Please check your API key or try again later.")
+    else:
+        voice_data = []
+        for voice_id, voice in voice_dict.items():
+            voice_data.append({
+                "Name": safe_get(voice, "name", "Unknown"),
+                "Gender": safe_get(voice, "gender", "Not specified"),
+                "Language": safe_get(voice, "language", "Not specified"),
+                "Accent": safe_get(voice, "accent", "Not specified"),
+                "ID": voice_id
+            })
         
-        voice_data.append({
-            "Name": voice_name,
-            "Gender": voice_gender,
-            "Language": voice_language,
-            "Accent": voice_accent,
-            "ID": voice_id
-        })
-    
-    # Convert to dataframe
-    df = pd.DataFrame(voice_data)
-    
-    # Add filters
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        gender_filter = st.multiselect("Filter by Gender", options=df["Gender"].unique(), default=[])
-    with col2:
-        language_filter = st.multiselect("Filter by Language", options=df["Language"].unique(), default=[])
-    with col3:
-        accent_filter = st.multiselect("Filter by Accent", options=df["Accent"].unique(), default=[])
-    
-    # Apply filters
-    filtered_df = df
-    if gender_filter:
-        filtered_df = filtered_df[filtered_df["Gender"].isin(gender_filter)]
-    if language_filter:
-        filtered_df = filtered_df[filtered_df["Language"].isin(language_filter)]
-    if accent_filter:
-        filtered_df = filtered_df[filtered_df["Accent"].isin(accent_filter)]
-    
-    # Display filtered dataframe
-    st.dataframe(filtered_df, use_container_width=True)
-    
-    # Voice selection
-    selected_voice_name = st.selectbox("Select Voice", options=list(voice_names.keys()))
-    if st.button("Confirm Voice Selection"):
-        st.session_state.selected_voice = voice_names[selected_voice_name]
-        add_to_history("Selected Voice", selected_voice_name)
-        st.success(f"Selected voice: {selected_voice_name}")
+        # Convert to dataframe
+        df = pd.DataFrame(voice_data)
+        
+        # Add filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            gender_filter = st.multiselect("Filter by Gender", options=df["Gender"].unique(), default=[])
+        with col2:
+            language_filter = st.multiselect("Filter by Language", options=df["Language"].unique(), default=[])
+        with col3:
+            accent_filter = st.multiselect("Filter by Accent", options=df["Accent"].unique(), default=[])
+        
+        # Apply filters
+        filtered_df = df
+        if gender_filter:
+            filtered_df = filtered_df[filtered_df["Gender"].isin(gender_filter)]
+        if language_filter:
+            filtered_df = filtered_df[filtered_df["Language"].isin(language_filter)]
+        if accent_filter:
+            filtered_df = filtered_df[filtered_df["Accent"].isin(accent_filter)]
+        
+        # Display filtered dataframe
+        st.dataframe(filtered_df, use_container_width=True)
+        
+        # Voice selection
+        if voice_names:
+            selected_voice_name = st.selectbox("Select Voice", options=list(voice_names.keys()))
+            if st.button("Confirm Voice Selection"):
+                st.session_state.selected_voice = voice_names[selected_voice_name]
+                add_to_history("Selected Voice", selected_voice_name)
+                st.success(f"Selected voice: {selected_voice_name}")
+        else:
+            st.warning("No voices available for selection.")
 
 with tab2:
     st.header("Generate Avatar Video")
@@ -274,25 +379,26 @@ with tab2:
     
     with col1:
         st.subheader("Selected Avatar")
-        if st.session_state.selected_avatar:
+        if st.session_state.selected_avatar and st.session_state.selected_avatar in avatar_dict:
             avatar = avatar_dict.get(st.session_state.selected_avatar)
             if avatar:
-                st.write(f"**Name:** {avatar.get('name', 'Unknown')}")
-                if avatar.get("previewImageUrl"):
-                    st.image(avatar.get("previewImageUrl"), width=200)
+                st.write(f"**Name:** {safe_get(avatar, 'name', 'Unknown')}")
+                avatar_image = safe_get(avatar, "previewImageUrl")
+                if avatar_image:
+                    st.image(avatar_image, width=200)
                 st.write(f"**ID:** {st.session_state.selected_avatar}")
         else:
             st.warning("No avatar selected. Please go to the 'Select Avatar & Voice' tab.")
     
     with col2:
         st.subheader("Selected Voice")
-        if st.session_state.selected_voice:
+        if st.session_state.selected_voice and st.session_state.selected_voice in voice_dict:
             voice = voice_dict.get(st.session_state.selected_voice)
             if voice:
-                st.write(f"**Name:** {voice.get('name', 'Unknown')}")
-                st.write(f"**Gender:** {voice.get('gender', 'Not specified')}")
-                st.write(f"**Language:** {voice.get('language', 'Not specified')}")
-                st.write(f"**Accent:** {voice.get('accent', 'Not specified')}")
+                st.write(f"**Name:** {safe_get(voice, 'name', 'Unknown')}")
+                st.write(f"**Gender:** {safe_get(voice, 'gender', 'Not specified')}")
+                st.write(f"**Language:** {safe_get(voice, 'language', 'Not specified')}")
+                st.write(f"**Accent:** {safe_get(voice, 'accent', 'Not specified')}")
                 st.write(f"**ID:** {st.session_state.selected_voice}")
         else:
             st.warning("No voice selected. Please go to the 'Select Avatar & Voice' tab.")
@@ -356,13 +462,13 @@ with tab2:
                 # Generate video
                 result = generate_video(avatar_id, voice_id, script, api_key, additional_params)
                 
-                if result and "id" in result:
+                if result and isinstance(result, dict) and "id" in result:
                     video_id = result["id"]
                     st.success(f"Video generation started! Video ID: {video_id}")
                     
                     # Get avatar and voice names for display
-                    avatar_name = avatar_dict.get(avatar_id, {}).get("name", "Unknown Avatar")
-                    voice_name = voice_dict.get(voice_id, {}).get("name", "Unknown Voice")
+                    avatar_name = safe_get(avatar_dict.get(avatar_id, {}), "name", "Unknown Avatar")
+                    voice_name = safe_get(voice_dict.get(voice_id, {}), "name", "Unknown Voice")
                     
                     # Save video ID to session state for tracking
                     st.session_state.videos.append({
@@ -383,6 +489,8 @@ with tab2:
                     st.info("Your video is being processed. Go to the 'Your Videos' tab to check status.")
                 else:
                     st.error("Failed to generate video. Please try again.")
+                    if show_debug and result:
+                        st.write("API Response:", result)
 
 with tab3:
     st.header("Your Videos")
@@ -432,12 +540,12 @@ with tab3:
                         with st.spinner("Checking status..."):
                             status_data = check_video_status(video['id'], api_key)
                             
-                            if status_data:
-                                current_status = status_data.get("status", "unknown")
+                            if status_data and isinstance(status_data, dict):
+                                current_status = safe_get(status_data, "status", "unknown")
                                 st.session_state.videos[i]["status"] = current_status
                                 
                                 if current_status == "completed":
-                                    video_url = status_data.get("videoUrl")
+                                    video_url = safe_get(status_data, "videoUrl")
                                     st.session_state.videos[i]["url"] = video_url
                                     st.success(f"Status updated: {current_status}")
                                     add_to_history("Video Completed", f"ID: {video['id']}")
@@ -450,6 +558,8 @@ with tab3:
                                     st.warning(f"Unknown status: {current_status}")
                             else:
                                 st.error("Failed to check video status")
+                                if show_debug and status_data:
+                                    st.write("Status Response:", status_data)
                 
                 # Video preview and download
                 if video['status'] == "completed" and video['url']:
@@ -476,7 +586,7 @@ with tab3:
                     progress_placeholder = st.empty()
                     progress_bar = progress_placeholder.progress(0)
                     for percent_complete in range(100):
-                        time.sleep(0.05)
+                        time.sleep(0.01)  # Reduced sleep time for faster animation
                         progress_bar.progress(percent_complete + 1)
                     progress_placeholder.empty()
                     
@@ -554,10 +664,10 @@ st.markdown("---")
 col1, col2, col3 = st.columns(3)
 with col1:
     st.markdown("### Pipio AI Avatar Generator")
-    st.markdown("Version 2.0")
+    st.markdown("Version 2.1")
 with col2:
     st.markdown("### Powered by")
     st.markdown("[Pipio AI API](https://pipio.ai)")
 with col3:
     st.markdown("### Need Help?")
-    st.markdown("[Documentation](https://docs.pipio.ai) | [Support](mailto:support@pipio.ai)")
+    st.markdown("[Documentation](https://docs.pipio.ai) | [Support](mailto:support@pipio.ai)")pport@pipio.ai)")
