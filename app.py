@@ -670,4 +670,4 @@ with col2:
     st.markdown("[Pipio AI API](https://pipio.ai)")
 with col3:
     st.markdown("### Need Help?")
-    st.markdown("[Documentation](https://docs.pipio.ai) | [Support](mailto:support@pipio.ai)"
+    st.markdown("[Documentation](https://docs.pipio.ai) | [Support](mailto:support@pipio.ai)")
