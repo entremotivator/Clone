@@ -84,40 +84,6 @@ headers = {
     "Authorization": f"Key {api_key}"
 }
 
-# Function to extract data from API response
-def extract_data_from_response(response, api_name="API"):
-    """Extract data from API response, handling different possible formats"""
-    if isinstance(response, list):
-        return response
-    elif isinstance(response, dict):
-        # Check common JSON response patterns
-        if "data" in response:
-            return response["data"]
-        elif "results" in response:
-            return response["results"]
-        elif "items" in response:
-            return response["items"]
-        elif "response" in response:
-            return extract_data_from_response(response["response"], api_name)
-        elif "actors" in response and api_name.lower() == "avatar":
-            return response["actors"]
-        elif "voices" in response and api_name.lower() == "voice":
-            return response["voices"]
-        # Special case for Pipio API - check if the dictionary contains items that look like avatars/voices
-        elif all(key in response for key in ["id", "name"]):
-            return [response]  # It's a single item, wrap in list
-        else:
-            # If we can find any array in the response with typical fields, use that
-            for key, value in response.items():
-                if isinstance(value, list) and len(value) > 0:
-                    if isinstance(value[0], dict) and "id" in value[0]:
-                        return value
-            # Last resort: just return the dictionary keys as items
-            if show_debug:
-                st.write(f"Could not find a list in response, keys found: {list(response.keys())}")
-            return []
-    return []
-
 # Function to safely get value from dictionary
 def safe_get(dictionary, key, default=None):
     """Safely get a value from a dictionary"""
@@ -147,31 +113,35 @@ def get_avatars(api_key):
             if isinstance(raw_response, dict):
                 st.write("Avatar Response Keys:", list(raw_response.keys()))
         
-        # Extract the actual data from the response
-        data = extract_data_from_response(raw_response, "avatar")
+        # According to Pipio AI documentation, the response should be a list of actors
+        # If it's already a list, use it directly
+        if isinstance(raw_response, list):
+            return raw_response
         
-        # Additional debug info about extracted data
-        if show_debug:
-            st.write("Extracted Avatar Data Type:", type(data))
-            st.write("Extracted Avatar Data Length:", len(data) if isinstance(data, list) else "N/A")
-            if isinstance(data, list) and len(data) > 0:
-                st.write("Sample Avatar Item:", data[0])
-        
-        # If we couldn't extract a list, try to directly use the raw response
-        if not isinstance(data, list):
-            st.warning(f"Avatar API returned unexpected format, attempting to use raw response")
-            # Create a simple list with the raw response as an item if it has an ID
-            if isinstance(raw_response, dict) and "id" in raw_response:
-                return [raw_response]
+        # If it's a dictionary, look for the 'actors' key (based on documentation)
+        if isinstance(raw_response, dict):
+            # Check for common keys based on API documentation
+            if 'actors' in raw_response:
+                return raw_response['actors']
+            elif 'data' in raw_response:
+                return raw_response['data']
+            elif 'results' in raw_response:
+                return raw_response['results']
+            # If we can't find a specific key, return mock data for testing
             else:
-                # Mock data for testing if API doesn't work
-                st.error("Using mock avatar data for testing purposes")
+                st.warning("Could not find actors in API response. Using mock data for testing.")
                 return [
                     {"id": "avatar1", "name": "Test Avatar 1", "previewImageUrl": "https://placeholder.svg?height=150&width=150&query=Avatar+1"},
                     {"id": "avatar2", "name": "Test Avatar 2", "previewImageUrl": "https://placeholder.svg?height=150&width=150&query=Avatar+2"}
                 ]
         
-        return data
+        # If response is neither a list nor a dictionary, return mock data
+        st.error(f"Unexpected response format: {type(raw_response)}")
+        return [
+            {"id": "avatar1", "name": "Test Avatar 1", "previewImageUrl": "https://placeholder.svg?height=150&width=150&query=Avatar+1"},
+            {"id": "avatar2", "name": "Test Avatar 2", "previewImageUrl": "https://placeholder.svg?height=150&width=150&query=Avatar+2"}
+        ]
+        
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching avatars: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
@@ -210,31 +180,35 @@ def get_voices(api_key):
             if isinstance(raw_response, dict):
                 st.write("Voice Response Keys:", list(raw_response.keys()))
         
-        # Extract the actual data from the response
-        data = extract_data_from_response(raw_response, "voice")
+        # According to Pipio AI documentation, the response should be a list of voices
+        # If it's already a list, use it directly
+        if isinstance(raw_response, list):
+            return raw_response
         
-        # Additional debug info about extracted data
-        if show_debug:
-            st.write("Extracted Voice Data Type:", type(data))
-            st.write("Extracted Voice Data Length:", len(data) if isinstance(data, list) else "N/A")
-            if isinstance(data, list) and len(data) > 0:
-                st.write("Sample Voice Item:", data[0])
-        
-        # If we couldn't extract a list, try to directly use the raw response
-        if not isinstance(data, list):
-            st.warning(f"Voice API returned unexpected format, attempting to use raw response")
-            # Create a simple list with the raw response as an item if it has an ID
-            if isinstance(raw_response, dict) and "id" in raw_response:
-                return [raw_response]
+        # If it's a dictionary, look for the 'voices' key (based on documentation)
+        if isinstance(raw_response, dict):
+            # Check for common keys based on API documentation
+            if 'voices' in raw_response:
+                return raw_response['voices']
+            elif 'data' in raw_response:
+                return raw_response['data']
+            elif 'results' in raw_response:
+                return raw_response['results']
+            # If we can't find a specific key, return mock data for testing
             else:
-                # Mock data for testing if API doesn't work
-                st.error("Using mock voice data for testing purposes")
+                st.warning("Could not find voices in API response. Using mock data for testing.")
                 return [
                     {"id": "voice1", "name": "Test Voice 1", "gender": "Male", "language": "English", "accent": "American"},
                     {"id": "voice2", "name": "Test Voice 2", "gender": "Female", "language": "English", "accent": "British"}
                 ]
         
-        return data
+        # If response is neither a list nor a dictionary, return mock data
+        st.error(f"Unexpected response format: {type(raw_response)}")
+        return [
+            {"id": "voice1", "name": "Test Voice 1", "gender": "Male", "language": "English", "accent": "American"},
+            {"id": "voice2", "name": "Test Voice 2", "gender": "Female", "language": "English", "accent": "British"}
+        ]
+        
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching voices: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
@@ -852,7 +826,7 @@ st.markdown("---")
 col1, col2, col3 = st.columns(3)
 with col1:
     st.markdown("### Pipio AI Avatar Generator")
-    st.markdown("Version 2.2")
+    st.markdown("Version 2.3")
 with col2:
     st.markdown("### Powered by")
     st.markdown("[Pipio AI API](https://pipio.ai)")
