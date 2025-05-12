@@ -40,7 +40,7 @@ with st.sidebar:
         cache_ttl = st.slider("Cache TTL (minutes)", 5, 60, 10)
         auto_refresh = st.checkbox("Auto-refresh video status", value=True)
         refresh_interval = st.slider("Refresh interval (seconds)", 5, 60, 15)
-        show_debug = st.checkbox("Show debug information", value=False)
+        show_debug = st.checkbox("Show debug information", value=True)  # Set to True by default for now
     
     # About section
     with st.expander("About"):
@@ -84,6 +84,40 @@ headers = {
     "Authorization": f"Key {api_key}"
 }
 
+# Function to extract data from API response
+def extract_data_from_response(response, api_name="API"):
+    """Extract data from API response, handling different possible formats"""
+    if isinstance(response, list):
+        return response
+    elif isinstance(response, dict):
+        # Check common JSON response patterns
+        if "data" in response:
+            return response["data"]
+        elif "results" in response:
+            return response["results"]
+        elif "items" in response:
+            return response["items"]
+        elif "response" in response:
+            return extract_data_from_response(response["response"], api_name)
+        elif "actors" in response and api_name.lower() == "avatar":
+            return response["actors"]
+        elif "voices" in response and api_name.lower() == "voice":
+            return response["voices"]
+        # Special case for Pipio API - check if the dictionary contains items that look like avatars/voices
+        elif all(key in response for key in ["id", "name"]):
+            return [response]  # It's a single item, wrap in list
+        else:
+            # If we can find any array in the response with typical fields, use that
+            for key, value in response.items():
+                if isinstance(value, list) and len(value) > 0:
+                    if isinstance(value[0], dict) and "id" in value[0]:
+                        return value
+            # Last resort: just return the dictionary keys as items
+            if show_debug:
+                st.write(f"Could not find a list in response, keys found: {list(response.keys())}")
+            return []
+    return []
+
 # Function to safely get value from dictionary
 def safe_get(dictionary, key, default=None):
     """Safely get a value from a dictionary"""
@@ -102,28 +136,55 @@ def get_avatars(api_key):
             headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
         )
         response.raise_for_status()
-        data = response.json()
         
-        # Debug output
+        # Get raw response
+        raw_response = response.json()
+        
+        # Debug output for the raw API response
         if show_debug:
-            st.write("Avatar API Response:", data)
+            st.write("Raw Avatar API Response:", raw_response)
+            st.write("Avatar Response Type:", type(raw_response))
+            if isinstance(raw_response, dict):
+                st.write("Avatar Response Keys:", list(raw_response.keys()))
         
-        # Check if data is a list
+        # Extract the actual data from the response
+        data = extract_data_from_response(raw_response, "avatar")
+        
+        # Additional debug info about extracted data
+        if show_debug:
+            st.write("Extracted Avatar Data Type:", type(data))
+            st.write("Extracted Avatar Data Length:", len(data) if isinstance(data, list) else "N/A")
+            if isinstance(data, list) and len(data) > 0:
+                st.write("Sample Avatar Item:", data[0])
+        
+        # If we couldn't extract a list, try to directly use the raw response
         if not isinstance(data, list):
-            # If data is not a list, check if it has a data field that is a list
-            if isinstance(data, dict) and isinstance(data.get('data'), list):
-                return data.get('data')
-            st.error(f"Unexpected avatar data format: {type(data)}")
-            return []
+            st.warning(f"Avatar API returned unexpected format, attempting to use raw response")
+            # Create a simple list with the raw response as an item if it has an ID
+            if isinstance(raw_response, dict) and "id" in raw_response:
+                return [raw_response]
+            else:
+                # Mock data for testing if API doesn't work
+                st.error("Using mock avatar data for testing purposes")
+                return [
+                    {"id": "avatar1", "name": "Test Avatar 1", "previewImageUrl": "https://placeholder.svg?height=150&width=150&query=Avatar+1"},
+                    {"id": "avatar2", "name": "Test Avatar 2", "previewImageUrl": "https://placeholder.svg?height=150&width=150&query=Avatar+2"}
+                ]
         
         return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching avatars: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
-            st.error(f"Response: {e.response.text}")
+            try:
+                st.error(f"Response status code: {e.response.status_code}")
+                st.error(f"Response: {e.response.text}")
+            except:
+                st.error("Could not parse error response")
         return []
     except json.JSONDecodeError as e:
         st.error(f"Error decoding avatar JSON: {str(e)}")
+        if show_debug:
+            st.write("Raw response:", response.text[:500] + "..." if len(response.text) > 500 else response.text)
         return []
     except Exception as e:
         st.error(f"Unexpected error fetching avatars: {str(e)}")
@@ -138,28 +199,55 @@ def get_voices(api_key):
             headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
         )
         response.raise_for_status()
-        data = response.json()
         
-        # Debug output
+        # Get raw response
+        raw_response = response.json()
+        
+        # Debug output for the raw API response
         if show_debug:
-            st.write("Voice API Response:", data)
+            st.write("Raw Voice API Response:", raw_response)
+            st.write("Voice Response Type:", type(raw_response))
+            if isinstance(raw_response, dict):
+                st.write("Voice Response Keys:", list(raw_response.keys()))
         
-        # Check if data is a list
+        # Extract the actual data from the response
+        data = extract_data_from_response(raw_response, "voice")
+        
+        # Additional debug info about extracted data
+        if show_debug:
+            st.write("Extracted Voice Data Type:", type(data))
+            st.write("Extracted Voice Data Length:", len(data) if isinstance(data, list) else "N/A")
+            if isinstance(data, list) and len(data) > 0:
+                st.write("Sample Voice Item:", data[0])
+        
+        # If we couldn't extract a list, try to directly use the raw response
         if not isinstance(data, list):
-            # If data is not a list, check if it has a data field that is a list
-            if isinstance(data, dict) and isinstance(data.get('data'), list):
-                return data.get('data')
-            st.error(f"Unexpected voice data format: {type(data)}")
-            return []
+            st.warning(f"Voice API returned unexpected format, attempting to use raw response")
+            # Create a simple list with the raw response as an item if it has an ID
+            if isinstance(raw_response, dict) and "id" in raw_response:
+                return [raw_response]
+            else:
+                # Mock data for testing if API doesn't work
+                st.error("Using mock voice data for testing purposes")
+                return [
+                    {"id": "voice1", "name": "Test Voice 1", "gender": "Male", "language": "English", "accent": "American"},
+                    {"id": "voice2", "name": "Test Voice 2", "gender": "Female", "language": "English", "accent": "British"}
+                ]
         
         return data
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching voices: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
-            st.error(f"Response: {e.response.text}")
+            try:
+                st.error(f"Response status code: {e.response.status_code}")
+                st.error(f"Response: {e.response.text}")
+            except:
+                st.error("Could not parse error response")
         return []
     except json.JSONDecodeError as e:
         st.error(f"Error decoding voice JSON: {str(e)}")
+        if show_debug:
+            st.write("Raw response:", response.text[:500] + "..." if len(response.text) > 500 else response.text)
         return []
     except Exception as e:
         st.error(f"Unexpected error fetching voices: {str(e)}")
@@ -188,11 +276,21 @@ def generate_video(actor_id, voice_id, script, api_key, additional_params=None):
             data=json.dumps(payload)
         )
         response.raise_for_status()
-        return response.json()
+        response_data = response.json()
+        
+        # Debug output for response
+        if show_debug:
+            st.write("Generate Video Response:", response_data)
+        
+        return response_data
     except requests.exceptions.RequestException as e:
         st.error(f"Error generating video: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
-            st.error(f"Response: {e.response.text}")
+            try:
+                st.error(f"Response status code: {e.response.status_code}")
+                st.error(f"Response: {e.response.text}")
+            except:
+                st.error("Could not parse error response")
         return None
     except json.JSONDecodeError as e:
         st.error(f"Error decoding generation JSON: {str(e)}")
@@ -209,11 +307,21 @@ def check_video_status(video_id, api_key):
             headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
         )
         response.raise_for_status()
-        return response.json()
+        response_data = response.json()
+        
+        # Debug output for response
+        if show_debug:
+            st.write("Video Status Response:", response_data)
+        
+        return response_data
     except requests.exceptions.RequestException as e:
         st.error(f"Error checking video status: {str(e)}")
         if show_debug and hasattr(e, 'response') and e.response:
-            st.error(f"Response: {e.response.text}")
+            try:
+                st.error(f"Response status code: {e.response.status_code}")
+                st.error(f"Response: {e.response.text}")
+            except:
+                st.error("Could not parse error response")
         return None
     except json.JSONDecodeError as e:
         st.error(f"Error decoding status JSON: {str(e)}")
@@ -253,15 +361,37 @@ if show_debug:
     st.write(f"Avatars type: {type(avatars)}, length: {len(avatars) if isinstance(avatars, list) else 'N/A'}")
     st.write(f"Voices type: {type(voices)}, length: {len(voices) if isinstance(voices, list) else 'N/A'}")
 
-if not isinstance(avatars, list) or not isinstance(voices, list):
-    st.error("Failed to load avatars or voices. API returned invalid data format.")
-    if show_debug:
-        st.write("Avatars:", avatars)
-        st.write("Voices:", voices)
-    st.stop()
-
-if not avatars or not voices:
+# Verify we have valid lists - treat empty lists as failed too
+if not isinstance(avatars, list) or not isinstance(voices, list) or len(avatars) == 0 or len(voices) == 0:
     st.error("Failed to load avatars or voices. Please check your API key and try again.")
+    # Provide more specific error messages
+    if not isinstance(avatars, list):
+        st.error(f"Avatar data is not a list: {type(avatars)}")
+    elif len(avatars) == 0:
+        st.error("No avatars found in the response")
+    if not isinstance(voices, list):
+        st.error(f"Voice data is not a list: {type(voices)}")
+    elif len(voices) == 0:
+        st.error("No voices found in the response")
+    
+    # Show some alternative options
+    st.info("You can try the following:")
+    st.info("1. Check that your API key is correct")
+    st.info("2. Ensure you have access to the Pipio AI API")
+    st.info("3. Try again later as the API may be temporarily unavailable")
+    
+    if show_debug:
+        st.subheader("Debug Information")
+        st.write("API key length:", len(api_key) if api_key else "No API key provided")
+        if isinstance(avatars, list):
+            st.write("Avatar sample:", avatars[:1])
+        else:
+            st.write("Avatars:", avatars)
+        if isinstance(voices, list):
+            st.write("Voice sample:", voices[:1])
+        else:
+            st.write("Voices:", voices)
+    
     st.stop()
 
 # Create tabs for different sections
@@ -659,12 +789,70 @@ with tab4:
             st.success("History cleared")
             st.rerun()
 
+# Add API tester section
+with st.sidebar:
+    with st.expander("API Tester"):
+        st.subheader("Test API Endpoints")
+        test_button = st.button("Test API Connection")
+        if test_button:
+            st.write("Testing API connection...")
+            
+            # Test avatar endpoint
+            try:
+                avatar_response = requests.get(
+                    "https://avatar.pipio.ai/actor",
+                    headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
+                )
+                st.write(f"Avatar API Status Code: {avatar_response.status_code}")
+                if avatar_response.status_code == 200:
+                    st.success("Avatar API connection successful")
+                    try:
+                        data = avatar_response.json()
+                        st.write(f"Response Type: {type(data)}")
+                        if isinstance(data, dict):
+                            st.write(f"Keys: {list(data.keys())}")
+                        elif isinstance(data, list):
+                            st.write(f"List length: {len(data)}")
+                            if len(data) > 0:
+                                st.write("First item:", data[0])
+                    except:
+                        st.error("Could not parse JSON response")
+                else:
+                    st.error(f"Avatar API error: {avatar_response.status_code}")
+            except Exception as e:
+                st.error(f"Avatar API test failed: {str(e)}")
+            
+            # Test voice endpoint
+            try:
+                voice_response = requests.get(
+                    "https://avatar.pipio.ai/voice",
+                    headers={"Authorization": f"Key {api_key}", "Accept": "application/json"}
+                )
+                st.write(f"Voice API Status Code: {voice_response.status_code}")
+                if voice_response.status_code == 200:
+                    st.success("Voice API connection successful")
+                    try:
+                        data = voice_response.json()
+                        st.write(f"Response Type: {type(data)}")
+                        if isinstance(data, dict):
+                            st.write(f"Keys: {list(data.keys())}")
+                        elif isinstance(data, list):
+                            st.write(f"List length: {len(data)}")
+                            if len(data) > 0:
+                                st.write("First item:", data[0])
+                    except:
+                        st.error("Could not parse JSON response")
+                else:
+                    st.error(f"Voice API error: {voice_response.status_code}")
+            except Exception as e:
+                st.error(f"Voice API test failed: {str(e)}")
+
 # Footer
 st.markdown("---")
 col1, col2, col3 = st.columns(3)
 with col1:
     st.markdown("### Pipio AI Avatar Generator")
-    st.markdown("Version 2.1")
+    st.markdown("Version 2.2")
 with col2:
     st.markdown("### Powered by")
     st.markdown("[Pipio AI API](https://pipio.ai)")
